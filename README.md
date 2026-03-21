@@ -35,7 +35,7 @@ Copy the script somewhere in your PATH on both laptops, for example:
 mkdir -p ~/.local/bin ~/.config/workspace_sync
 cp workspace_sync.py ~/.local/bin/
 chmod +x ~/.local/bin/workspace_sync.py
-cp workspace_sync_config.example.json ~/.config/workspace_sync/config.json
+cp workspace_sync_config.json ~/.config/workspace_sync/config.json
 ```
 
 Edit the config on **both** laptops.
