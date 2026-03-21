@@ -87,7 +87,7 @@ def run(cmd: list[str], *, cwd: Path | None = None, capture: bool = True, check:
 
 
 def norm_abs(path_str: str) -> Path:
-    return Path(path_str).expanduser().resolve()
+    return Path(path_str).expanduser().absolute()
 
 
 def rel_to_home(path: Path, home: Path) -> str:
@@ -152,7 +152,7 @@ def should_exclude(path: Path, relative: str, exclude_names: set[str], exclude_p
 
 
 def scan_workspace(config: dict[str, Any]) -> tuple[list[RepoInfo], list[str], list[ExtraPathInfo]]:
-    home = Path.home().resolve()
+    home = Path.home().absolute()
     roots = [norm_abs(p) for p in config["roots"]]
     extra_paths = [norm_abs(p) for p in config.get("extra_paths", [])]
     exclude_names = set(config.get("exclude_names", [])) | {".git"}
@@ -169,7 +169,7 @@ def scan_workspace(config: dict[str, Any]) -> tuple[list[RepoInfo], list[str], l
             raise SyncError(f"Configured root is not a directory: {root}")
 
         for dirpath, dirnames, filenames in os.walk(root):
-            current = Path(dirpath).resolve()
+            current = Path(dirpath)
             rel_current = rel_to_home(current, home)
             dirnames[:] = [d for d in dirnames if d not in exclude_names]
             if should_exclude(current, rel_current, exclude_names, exclude_path_contains):
@@ -183,7 +183,7 @@ def scan_workspace(config: dict[str, Any]) -> tuple[list[RepoInfo], list[str], l
                 continue
 
             for filename in filenames:
-                file_path = (current / filename).resolve()
+                file_path = current / filename
                 rel_file = rel_to_home(file_path, home)
                 if should_exclude(file_path, rel_file, exclude_names, exclude_path_contains):
                     continue
@@ -200,7 +200,7 @@ def scan_workspace(config: dict[str, Any]) -> tuple[list[RepoInfo], list[str], l
                 non_git_files.add(rel_file)
         else:
             for dirpath, dirnames, filenames in os.walk(extra):
-                current = Path(dirpath).resolve()
+                current = Path(dirpath)
                 rel_current = rel_to_home(current, home)
                 dirnames[:] = [d for d in dirnames if d not in exclude_names]
                 if should_exclude(current, rel_current, exclude_names, exclude_path_contains):
@@ -212,7 +212,7 @@ def scan_workspace(config: dict[str, Any]) -> tuple[list[RepoInfo], list[str], l
                     continue
 
                 for filename in filenames:
-                    file_path = (current / filename).resolve()
+                    file_path = current / filename
                     rel_file = rel_to_home(file_path, home)
                     if should_exclude(file_path, rel_file, exclude_names, exclude_path_contains):
                         continue
