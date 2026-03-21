@@ -1,0 +1,29 @@
+{
+  "roots": [
+    "~/workspace_main",
+    "~/workspace_ml",
+    "~/workspace_clients"
+  ],
+  "extra_paths": [
+    "~/Documents/notes",
+    "~/.config/my_templates"
+  ],
+  "exclude_names": [
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    "node_modules",
+    "build",
+    "dist",
+    ".dart_tool",
+    ".gradle",
+    ".cache"
+  ],
+  "exclude_path_contains": [
+    "/.idea/",
+    "/.vscode/"
+  ],
+  "require_clean_git": true,
+  "snapshot_dir": "~/.workspace_sync/latest",
+  "target_home": "~/"
+}
