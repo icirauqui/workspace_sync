@@ -26,10 +26,18 @@ You also need Python 3.
 
 - `workspace_sync.py`
 - `workspace_sync_config.example.json`
+- `setup_workspace_sync.sh`
 
 ## Setup
 
-Copy the script somewhere in your PATH on both laptops, for example:
+Use the helper script on each laptop:
+
+```bash
+./setup_workspace_sync.sh source
+./setup_workspace_sync.sh target
+```
+
+Or copy the script somewhere in your PATH on both laptops manually:
 
 ```bash
 mkdir -p ~/.local/bin ~/.config/workspace_sync
@@ -80,6 +88,8 @@ This writes:
 
 under `snapshot_dir`.
 
+The command prints progress while it scans roots and packs non-Git files into the snapshot.
+
 By default the script refuses to export if any tracked repo is dirty and `require_clean_git` is `true`.
 
 ### 2. On the target laptop
@@ -97,6 +107,8 @@ This will:
 - fetch/prune existing repos
 - switch to the recorded branch
 - fast-forward to the recorded commit when possible
+
+The command prints stage-level progress, and `rsync` or `git` transfer operations show their own progress output when available.
 
 ## Safer default behavior
 

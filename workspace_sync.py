@@ -69,6 +69,18 @@ def load_config(config_path: Path) -> dict[str, Any]:
     return config
 
 
+def announce(message: str) -> None:
+    print(message, flush=True)
+
+
+def progress(message: str, index: int | None = None, total: int | None = None) -> None:
+    if index is not None and total is not None:
+        width = len(str(total))
+        announce(f"[{index:>{width}}/{total}] {message}")
+        return
+    announce(f"[*] {message}")
+
+
 def run(cmd: list[str], *, cwd: Path | None = None, capture: bool = True, check: bool = True) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         cmd,
@@ -78,10 +90,12 @@ def run(cmd: list[str], *, cwd: Path | None = None, capture: bool = True, check:
         check=False,
     )
     if check and proc.returncode != 0:
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
         raise SyncError(
             f"Command failed ({proc.returncode}): {' '.join(cmd)}\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
+            f"stdout:\n{stdout}\n"
+            f"stderr:\n{stderr}"
         )
     return proc
 
@@ -157,12 +171,14 @@ def scan_workspace(config: dict[str, Any]) -> tuple[list[RepoInfo], list[str], l
     extra_paths = [norm_abs(p) for p in config.get("extra_paths", [])]
     exclude_names = set(config.get("exclude_names", [])) | {".git"}
     exclude_path_contains = list(config.get("exclude_path_contains", []))
+    total_paths = len(roots) + len(extra_paths)
 
     repos: dict[Path, RepoInfo] = {}
     non_git_files: set[str] = set()
     extra_entries: list[ExtraPathInfo] = []
 
-    for root in roots:
+    for index, root in enumerate(roots, start=1):
+        progress(f"Scanning root: {root}", index, total_paths)
         if not root.exists():
             raise SyncError(f"Configured root does not exist: {root}")
         if not root.is_dir():
@@ -190,7 +206,8 @@ def scan_workspace(config: dict[str, Any]) -> tuple[list[RepoInfo], list[str], l
                 if git_toplevel(file_path.parent) is None:
                     non_git_files.add(rel_file)
 
-    for extra in extra_paths:
+    for index, extra in enumerate(extra_paths, start=len(roots) + 1):
+        progress(f"Scanning extra path: {extra}", index, total_paths)
         if not extra.exists():
             raise SyncError(f"Configured extra path does not exist: {extra}")
         extra_entries.append(ExtraPathInfo(path=rel_to_home(extra, home), type="dir" if extra.is_dir() else "file"))
@@ -220,6 +237,7 @@ def scan_workspace(config: dict[str, Any]) -> tuple[list[RepoInfo], list[str], l
 
     repo_list = sorted(repos.values(), key=lambda r: r.path)
     file_list = sorted(non_git_files)
+    progress(f"Scan complete: {len(repo_list)} repos, {len(file_list)} non-git files.")
     return repo_list, file_list, extra_entries
 
 
@@ -263,8 +281,10 @@ def rsync_push_non_git(snapshot_dir: Path, non_git_files: list[str]) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
 
     if not non_git_files:
+        progress("No non-git files to copy into the snapshot.")
         return
 
+    progress(f"Copying {len(non_git_files)} non-git files into the snapshot.")
     with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as tf:
         for rel_path in non_git_files:
             tf.write(rel_path + "\n")
@@ -276,34 +296,44 @@ def rsync_push_non_git(snapshot_dir: Path, non_git_files: list[str]) -> None:
                 RSYNC_BIN,
                 "-a",
                 "--delete",
+                "--human-readable",
+                "--info=progress2",
                 f"--files-from={temp_name}",
                 f"{source_home}/",
                 f"{data_dir}/",
-            ]
+            ],
+            capture=False,
         )
     finally:
         os.unlink(temp_name)
 
 
 def prepare_source(config_path: Path) -> None:
+    progress(f"Loading config: {config_path}")
     config = load_config(config_path)
     repos, non_git_files, extra_entries = scan_workspace(config)
+    progress(f"Writing snapshot manifest in {norm_abs(config['snapshot_dir'])}")
     snapshot_dir = write_snapshot(config, repos, non_git_files, extra_entries)
     rsync_push_non_git(snapshot_dir, non_git_files)
-    print(f"Prepared snapshot in: {snapshot_dir}")
-    print(f"Repos: {len(repos)}")
-    print(f"Non-git files: {len(non_git_files)}")
+    announce(f"Prepared snapshot in: {snapshot_dir}")
+    announce(f"Repos: {len(repos)}")
+    announce(f"Non-git files: {len(non_git_files)}")
 
 
 def pull_snapshot(source: str, remote_snapshot_dir: str, local_snapshot_dir: Path) -> None:
     local_snapshot_dir.mkdir(parents=True, exist_ok=True)
+    progress(f"Pulling snapshot from {source}:{remote_snapshot_dir}")
     run([
         RSYNC_BIN,
         "-az",
         "--delete",
+        "--human-readable",
+        "--info=progress2",
+        "-e",
+        SSH_BIN,
         f"{source}:{remote_snapshot_dir.rstrip('/')}/",
         f"{local_snapshot_dir}/",
-    ])
+    ], capture=False)
 
 
 def load_manifest(snapshot_dir: Path) -> dict[str, Any]:
@@ -321,10 +351,17 @@ def ensure_parent(path: Path) -> None:
 def sync_non_git_to_target(snapshot_dir: Path, manifest: dict[str, Any], target_home: Path) -> None:
     src_data = snapshot_dir / "non_git_home"
     if not src_data.exists():
+        progress("Snapshot does not include non-git file data; skipping file mirror.")
         return
 
+    non_git_files = manifest.get("non_git_files", [])
+    if not non_git_files:
+        progress("No non-git files to mirror onto the target.")
+        return
+
+    progress(f"Mirroring {len(non_git_files)} non-git files into {target_home}")
     with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as tf:
-        for rel_path in manifest.get("non_git_files", []):
+        for rel_path in non_git_files:
             tf.write(rel_path + "\n")
         temp_name = tf.name
 
@@ -333,10 +370,12 @@ def sync_non_git_to_target(snapshot_dir: Path, manifest: dict[str, Any], target_
             RSYNC_BIN,
             "-a",
             "--delete",
+            "--human-readable",
+            "--info=progress2",
             f"--files-from={temp_name}",
             f"{src_data}/",
             f"{target_home}/",
-        ])
+        ], capture=False)
     finally:
         os.unlink(temp_name)
 
@@ -371,7 +410,7 @@ def apply_repo(repo: dict[str, Any], target_home: Path, force_hard_reset: bool) 
         if not remote_url:
             return repo["path"], "missing remote_url; cannot clone"
         ensure_parent(repo_path)
-        run([GIT_BIN, "clone", remote_url, str(repo_path)])
+        run([GIT_BIN, "clone", "--progress", remote_url, str(repo_path)], capture=False)
 
     if not (repo_path / ".git").exists():
         return repo["path"], "exists but is not a git repo"
@@ -379,7 +418,7 @@ def apply_repo(repo: dict[str, Any], target_home: Path, force_hard_reset: bool) 
     if repo_dirty(repo_path) and not force_hard_reset:
         return repo["path"], "target repo has local changes; skipped"
 
-    run([GIT_BIN, "-C", str(repo_path), "fetch", "--all", "--prune"])
+    run([GIT_BIN, "-C", str(repo_path), "fetch", "--all", "--prune", "--progress"], capture=False)
 
     if desired_branch:
         local_branch = current_branch(repo_path)
@@ -408,6 +447,7 @@ def apply_repo(repo: dict[str, Any], target_home: Path, force_hard_reset: bool) 
 
 
 def apply_target(config_path: Path, source: str, remote_snapshot_dir: str | None, local_only: bool, force_hard_reset: bool) -> None:
+    progress(f"Loading config: {config_path}")
     config = load_config(config_path)
     local_snapshot_dir = norm_abs(config["snapshot_dir"])
 
@@ -415,20 +455,29 @@ def apply_target(config_path: Path, source: str, remote_snapshot_dir: str | None
         if not remote_snapshot_dir:
             remote_snapshot_dir = str(Path.home() / DEFAULT_SNAPSHOT_DIRNAME)
         pull_snapshot(source, remote_snapshot_dir, local_snapshot_dir)
+    else:
+        progress(f"Using local snapshot from {local_snapshot_dir}")
 
     manifest = load_manifest(local_snapshot_dir)
     target_home = norm_abs(config.get("target_home", str(Path.home())))
 
     sync_non_git_to_target(local_snapshot_dir, manifest, target_home)
 
+    repos = manifest.get("repos", [])
     results: list[tuple[str, str]] = []
-    for repo in manifest.get("repos", []):
+    if repos:
+        progress(f"Applying {len(repos)} repositories into {target_home}")
+    else:
+        progress("No repositories found in the snapshot.")
+
+    for index, repo in enumerate(repos, start=1):
+        progress(f"Syncing repo: {repo['path']}", index, len(repos))
         results.append(apply_repo(repo, target_home, force_hard_reset))
 
-    print(f"Applied snapshot from: {local_snapshot_dir}")
-    print("Repository results:")
+    announce(f"Applied snapshot from: {local_snapshot_dir}")
+    announce("Repository results:")
     for path, status in results:
-        print(f" - {path}: {status}")
+        announce(f" - {path}: {status}")
 
 
 def make_parser() -> argparse.ArgumentParser:
