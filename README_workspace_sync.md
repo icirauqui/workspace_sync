@@ -58,14 +58,6 @@ Important:
 
 The target laptop pulls from the source over SSH. Set up key-based SSH from target to source.
 
-On source:
-
-```bash
-sudo apt update
-sudo apt install -y openssh-server
-sudo systemctl enable --now ssh
-```
-
 On target:
 
 ```bash
@@ -78,9 +70,6 @@ Test it:
 ```bash
 ssh youruser@source-laptop hostname
 ```
-
-If `source-laptop` does not resolve on your network, use the source laptop hostname,
-`hostname.local`, or its LAN IP address instead.
 
 ## Usage
 
