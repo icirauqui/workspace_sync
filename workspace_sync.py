@@ -100,6 +100,29 @@ def run(cmd: list[str], *, cwd: Path | None = None, capture: bool = True, check:
     return proc
 
 
+def summarize_sync_error(exc: SyncError) -> str:
+    message = str(exc).strip()
+    stdout_marker = "\nstdout:\n"
+    stderr_marker = "\nstderr:\n"
+
+    stdout_text = ""
+    if stdout_marker in message:
+        stdout_text = message.split(stdout_marker, 1)[1]
+        if stderr_marker in stdout_text:
+            stdout_text = stdout_text.split(stderr_marker, 1)[0]
+
+    stderr_text = ""
+    if stderr_marker in message:
+        stderr_text = message.split(stderr_marker, 1)[1]
+
+    for text in (stderr_text, stdout_text):
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if lines:
+            return lines[-1]
+
+    return message.splitlines()[0]
+
+
 def norm_abs(path_str: str) -> Path:
     return Path(path_str).expanduser().absolute()
 
@@ -472,7 +495,12 @@ def apply_target(config_path: Path, source: str, remote_snapshot_dir: str | None
 
     for index, repo in enumerate(repos, start=1):
         progress(f"Syncing repo: {repo['path']}", index, len(repos))
-        results.append(apply_repo(repo, target_home, force_hard_reset))
+        try:
+            results.append(apply_repo(repo, target_home, force_hard_reset))
+        except SyncError as exc:
+            summary = summarize_sync_error(exc)
+            announce(f" ! Skipping {repo['path']}: {summary}")
+            results.append((repo["path"], f"error; skipped: {summary}"))
 
     announce(f"Applied snapshot from: {local_snapshot_dir}")
     announce("Repository results:")
